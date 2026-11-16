@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bybit Backtest · проверка стратегии на истории</title>
+<style>
+  :root{
+    --bg:#0e1117; --panel:#151a23; --panel2:#1b2230; --line:#232a36;
+    --text:#d4dae3; --muted:#7b8794; --green:#26a69a; --red:#ef5350;
+    --blue:#4d9fff; --orange:#ffa726; --purple:#ab7df6;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1180px;margin:0 auto;padding:22px 16px 60px}
+  h1{font-size:22px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);
+    border-radius:12px;padding:18px;margin-bottom:16px}
+  .grid{display:grid;gap:12px}
+  .g2{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+  .g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
+  label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;
+    text-transform:uppercase;letter-spacing:.4px}
+  input,select{width:100%;background:var(--panel2);border:1px solid var(--line);
+    color:var(--text);border-radius:8px;padding:10px 11px;font-size:15px;
+    outline:none}
+  input:focus,select:focus{border-color:var(--blue)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  button{background:var(--blue);color:#06131f;border:0;border-radius:9px;
+    padding:12px 20px;font-size:15px;font-weight:700;cursor:pointer}
+  button.ghost{background:transparent;color:var(--text);
+    border:1px solid var(--line);font-weight:600}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  details{margin-top:14px;border-top:1px solid var(--line);padding-top:14px}
+  summary{cursor:pointer;color:var(--muted);font-size:14px;user-select:none}
+  .bar{height:8px;background:var(--panel2);border-radius:5px;overflow:hidden;
+    margin:12px 0 8px}
+  .bar i{display:block;height:100%;background:var(--blue);width:0;
+    transition:width .3s}
+  .stat{background:var(--panel2);border-radius:10px;padding:14px}
+  .stat b{display:block;font-size:24px;line-height:1.2;margin-bottom:3px}
+  .stat span{font-size:12px;color:var(--muted)}
+  .pos{color:var(--green)} .neg{color:var(--red)} .mut{color:var(--muted)}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  th,td{padding:8px 9px;text-align:right;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:11.5px;
+    text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0;
+    background:var(--panel)}
+  th:first-child,td:first-child{text-align:left}
+  .scroll{max-height:420px;overflow:auto;border:1px solid var(--line);
+    border-radius:10px}
+  canvas{width:100%;height:230px;display:block}
+  .msg{padding:12px 14px;border-radius:9px;font-size:14px;margin-bottom:14px}
+  .err{background:rgba(239,83,80,.12);border:1px solid rgba(239,83,80,.4)}
+  .warn{background:rgba(255,167,38,.1);border:1px solid rgba(255,167,38,.35)}
+  .ok{background:rgba(38,166,154,.1);border:1px solid rgba(38,166,154,.35)}
+  .hide{display:none}
+  h3{font-size:15px;margin:0 0 12px}
+  .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;
+    background:var(--panel2);color:var(--muted);margin-left:7px}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:10px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🧪 Bybit Backtest</h1>
+  <div class="sub">Проверка стратегии «покупка после резкого падения» на реальной истории Bybit. Только лонги.</div>
+
+  <div class="card">
+    <div class="grid g2">
+      <div>
+        <label>Что тестируем</label>
+        <select id="mode">
+          <option value="single">Конкретные монеты</option>
+          <option value="top">Топ по обороту</option>
+        </select>
+      </div>
+      <div id="symBox">
+        <label>Тикер (можно несколько через запятую)</label>
+        <input id="symbol" placeholder="ASTER, SUI, AVAX" value="SUI">
+      </div>
+      <div id="topBox" class="hide">
+        <label>Сколько монет взять</label>
+        <input id="top_n" type="number" value="40" min="5" max="150">
+      </div>
+      <div>
+        <label>Период</label>
+        <select id="months">
+          <option value="3">3 месяца</option>
+          <option value="6" selected>6 месяцев</option>
+          <option value="12">12 месяцев</option>
+        </select>
+      </div>
+      <div>
+        <label>Цель с одной сделки, %</label>
+        <input id="tp_pct" type="number" step="0.5" value="5">
+      </div>
+      <div>
+        <label>Стоп</label>
+        <select id="sl_mode">
+          <option value="atr">Авто, под лоем по ATR</option>
+          <option value="fixed">Фиксированный %</option>
+        </select>
+      </div>
+      <div id="slFixedBox" class="hide">
+        <label>Стоп, %</label>
+        <input id="sl_fixed_pct" type="number" step="0.5" value="5">
+      </div>
+    </div>
+
+    <details>
+      <summary>Параметры стратегии и денег</summary>
+      <div class="grid g4" style="margin-top:14px">
+        <div><label>Падение за 3д, от %</label>
+          <input id="min_drop_3d" type="number" step="0.5" value="14"></div>
+        <div><label>Падение за сутки, от %</label>
+          <input id="min_drop_1d" type="number" step="0.5" value="8"></div>
+        <div><label>RSI 4ч, не выше</label>
+          <input id="rsi_max_4h" type="number" step="1" value="42"></div>
+        <div><label>RSI дневной, не выше</label>
+          <input id="rsi_max_1d" type="number" step="1" value="45"></div>
+        <div><label>Коэффициент шока</label>
+          <input id="shock_ratio" type="number" step="0.01" value="0.42"></div>
+        <div><label>Подтверждений разворота</label>
+          <input id="min_notes" type="number" step="1" value="2"></div>
+        <div><label>ATR 4ч, от %</label>
+          <input id="min_atr_pct_4h" type="number" step="0.1" value="1.2"></div>
+        <div><label>Макс. стоп, %</label>
+          <input id="max_sl_pct" type="number" step="0.5" value="7"></div>
+        <div><label>Стоп не ближе, ATR</label>
+          <input id="min_atr_distance" type="number" step="0.1" value="1.5"></div>
+        <div><label>Держим сделку, ч</label>
+          <input id="track_hours" type="number" step="6" value="72"></div>
+        <div><label>Одновременно сделок</label>
+          <input id="max_concurrent" type="number" step="1" value="3"></div>
+        <div><label>Комиссия одной стороны, %</label>
+          <input id="fee_pct" type="number" step="0.005" value="0.055"></div>
+        <div><label>Риск на сделку, %</label>
+          <input id="risk_pct" type="number" step="0.5" value="2"></div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Сетка для подбора параметров</summary>
+      <div class="grid g4" style="margin-top:14px">
+        <div><label>Варианты цели, %</label>
+          <input id="grid_tp" value="3, 5, 7, 10"></div>
+        <div><label>Варианты падения, %</label>
+          <input id="grid_drop" value="8, 11, 14, 18"></div>
+        <div><label>Варианты RSI 4ч</label>
+          <input id="grid_rsi" value="35, 42, 48"></div>
+        <div><label>Варианты «стоп не ближе, ATR»</label>
+          <input id="grid_atr" value="1.5" placeholder="1, 1.5, 2.5"></div>
+      </div>
+    </details>
+
+    <div class="row">
+      <button id="runBtn">▶ Прогнать бэктест</button>
+      <button id="sweepBtn" class="ghost">🔀 Подобрать параметры</button>
+      <button id="clearBtn" class="ghost">🗑 Очистить кэш</button>
+    </div>
+    <div class="foot" id="cacheInfo"></div>
+  </div>
+
+  <div class="card hide" id="progCard">
+    <div id="progStage">Работаю...</div>
+    <div class="bar"><i id="progBar"></i></div>
+    <div class="foot" id="progMsg"></div>
+  </div>
+
+  <div id="out"></div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const PARAM_IDS = ["tp_pct","sl_mode","sl_fixed_pct","min_drop_3d","min_drop_1d",
+  "rsi_max_4h","rsi_max_1d","shock_ratio","min_notes","min_atr_pct_4h",
+  "max_sl_pct","min_atr_distance","track_hours","max_concurrent",
+  "fee_pct","risk_pct"];
+
+$("mode").onchange = () => {
+  const top = $("mode").value === "top";
+  $("symBox").classList.toggle("hide", top);
+  $("topBox").classList.toggle("hide", !top);
+};
+$("sl_mode").onchange = () => {
+  $("slFixedBox").classList.toggle("hide", $("sl_mode").value !== "fixed");
+};
+
+function body(){
+  const b = {mode:$("mode").value, symbol:$("symbol").value,
+             top_n:$("top_n").value, months:$("months").value,
+             grid_tp:$("grid_tp").value, grid_drop:$("grid_drop").value,
+             grid_rsi:$("grid_rsi").value, grid_atr:$("grid_atr").value};
+  PARAM_IDS.forEach(k => { const el=$(k); if(el) b[k]=el.value; });
+  return b;
+}
+
+function fmt(v, d=2){ return (v>0?"+":"") + Number(v).toFixed(d); }
+function cls(v){ return v>0?"pos":(v<0?"neg":"mut"); }
+function dt(ms){ const x=new Date(ms); return x.toLocaleDateString("ru-RU",
+  {day:"2-digit",month:"2-digit",year:"2-digit"}); }
+
+async function start(url){
+  $("out").innerHTML = "";
+  $("progCard").classList.remove("hide");
+  $("runBtn").disabled = $("sweepBtn").disabled = true;
+  try{
+    const r = await fetch(url, {method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(body())});
+    const j = await r.json();
+    if(!j.job) throw new Error(j.error || "сервер не принял задание");
+    poll(j.job, url.includes("sweep"));
+  }catch(e){
+    fail(String(e));
+  }
+}
+
+function fail(msg){
+  $("progCard").classList.add("hide");
+  $("runBtn").disabled = $("sweepBtn").disabled = false;
+  $("out").innerHTML = `<div class="msg err">❌ ${msg}</div>`;
+}
+
+async function poll(jid, isSweep){
+  try{
+    const r = await fetch("/api/job/" + jid);
+    const j = await r.json();
+    if(j.status === "running"){
+      $("progStage").textContent = j.stage || "Работаю...";
+      const pctv = j.total ? Math.round(j.done / j.total * 100) : 0;
+      $("progBar").style.width = pctv + "%";
+      $("progMsg").textContent = (j.message || "") +
+        (j.total > 1 ? `   ${j.done} / ${j.total}` : "");
+      return setTimeout(() => poll(jid, isSweep), 700);
+    }
+    $("progCard").classList.add("hide");
+    $("runBtn").disabled = $("sweepBtn").disabled = false;
+    if(j.status === "error") return fail(j.error || "неизвестная ошибка");
+    isSweep ? renderSweep(j.result) : renderResult(j.result);
+    loadCache();
+  }catch(e){ fail(String(e)); }
+}
+
+function renderResult(res){
+  if(res.error) return fail(res.error);
+  const s = res.stats;
+  if(!s.trades){
+    $("out").innerHTML = `<div class="msg warn">За период не нашлось ни одной
+      сделки. Это само по себе результат: формация слишком редкая при текущих
+      порогах. Снизь «падение за 3д» или возьми больше монет
+      (режим «Топ по обороту»).</div>`;
+    return;
+  }
+  const edge = s.edge;
+  const verdict = edge > 3
+    ? `<div class="msg ok">✅ Винрейт <b>${s.winrate.toFixed(1)}%</b> выше
+       точки безубытка <b>${s.breakeven_winrate.toFixed(1)}%</b> на
+       ${fmt(edge,1)} п.п. На этих данных у стратегии есть перевес.</div>`
+    : (edge > -3
+      ? `<div class="msg warn">⚠️ Винрейт <b>${s.winrate.toFixed(1)}%</b> против
+         безубытка <b>${s.breakeven_winrate.toFixed(1)}%</b> — разница
+         ${fmt(edge,1)} п.п. Перевеса фактически нет, результат в пределах шума.</div>`
+      : `<div class="msg err">❌ Винрейт <b>${s.winrate.toFixed(1)}%</b> ниже
+         безубытка <b>${s.breakeven_winrate.toFixed(1)}%</b> на
+         ${fmt(edge,1)} п.п. На этих данных стратегия теряет деньги.</div>`);
+
+  const warn = s.trades < 30
+    ? `<div class="msg warn">Сделок всего ${s.trades} — для выводов мало.
+       Нужно хотя бы 30–50. Возьми больше монет или период подлиннее.</div>` : "";
+
+  const reg = s.by_regime || {};
+  const regRows = Object.keys(reg).map(k => {
+    const r = reg[k];
+    return `<tr><td>${k}</td><td>${r.trades}</td>
+      <td class="${cls(r.winrate-s.breakeven_winrate)}">${r.winrate.toFixed(1)}%</td>
+      <td class="${cls(r.expectancy)}">${fmt(r.expectancy)}%</td></tr>`;
+  }).join("");
+
+  const monRows = (s.monthly||[]).map(m =>
+    `<tr><td>${m.month}</td><td>${m.trades}</td>
+     <td class="${cls(m.total)}">${fmt(m.total)}%</td></tr>`).join("");
+
+  const symRows = (s.by_symbol||[]).map(x =>
+    `<tr><td>${x.symbol}</td><td>${x.trades}</td>
+     <td>${x.winrate.toFixed(0)}%</td>
+     <td class="${cls(x.total)}">${fmt(x.total)}%</td></tr>`).join("");
+
+  const trRows = (res.trades||[]).slice(0,300).map(t =>
+    `<tr><td>${t.symbol}</td><td>${dt(t.entry_ts)}</td>
+     <td>${t.outcome==="tp"?"🟢 тейк":(t.outcome==="sl"?"🔴 стоп":"⚪️ время")}</td>
+     <td class="${cls(t.pnl_pct)}">${fmt(t.pnl_pct)}%</td>
+     <td>${t.hours.toFixed(0)} ч</td>
+     <td>${t.drop_3d.toFixed(1)}%</td>
+     <td>${t.rsi_4h.toFixed(0)}</td>
+     <td class="neg">${t.mae_pct.toFixed(1)}%</td></tr>`).join("");
+
+  $("out").innerHTML = `
+    ${verdict}${warn}
+    <div class="card">
+      <h3>Итог <span class="pill">${res.symbols_loaded} монет ·
+        ${res.period.months} мес</span></h3>
+      <div class="grid g4">
+        <div class="stat"><b>${s.trades}</b><span>сделок</span></div>
+        <div class="stat"><b class="${cls(edge)}">${s.winrate.toFixed(1)}%</b>
+          <span>винрейт · безубыток ${s.breakeven_winrate.toFixed(1)}%</span></div>
+        <div class="stat"><b class="${cls(s.expectancy)}">${fmt(s.expectancy)}%</b>
+          <span>ожидание на сделку</span></div>
+        <div class="stat"><b class="${cls(s.profit_factor-1)}">${s.profit_factor.toFixed(2)}</b>
+          <span>профит-фактор</span></div>
+        <div class="stat"><b class="${cls(s.equity_mult-1)}">${((s.equity_mult-1)*100).toFixed(1)}%</b>
+          <span>рост депозита при риске ${res.params.risk_pct}%</span></div>
+        <div class="stat"><b class="neg">${s.max_dd.toFixed(1)}%</b>
+          <span>максимальная просадка</span></div>
+        <div class="stat"><b>${s.avg_hours.toFixed(0)} ч</b>
+          <span>в среднем в сделке</span></div>
+        <div class="stat"><b>${s.tp} / ${s.sl} / ${s.timeout}</b>
+          <span>тейк / стоп / по времени</span></div>
+      </div>
+      <div class="foot">Средний стоп ${s.avg_sl_pct.toFixed(2)}% ·
+        средний плюс ${fmt(s.avg_win)}% · средний минус ${fmt(s.avg_loss)}% ·
+        худшая просадка внутри сделки ${s.avg_mae.toFixed(2)}% ·
+        лучший ход ${fmt(s.avg_mfe)}%</div>
+    </div>
+
+    <div class="card"><h3>Кривая депозита</h3>
+      <canvas id="eq"></canvas>
+      <div class="foot">Фиксированный риск ${res.params.risk_pct}% на сделку.
+        Комиссия ${res.params.fee_pct}% за сторону и проскальзывание
+        ${res.params.slippage_pct}% уже вычтены.</div></div>
+
+    <div class="card"><h3>Зависимость от рынка</h3>
+      <table><thead><tr><th>Режим</th><th>Сделок</th><th>Винрейт</th>
+        <th>Ожидание</th></tr></thead><tbody>${regRows}</tbody></table>
+      <div class="foot">Режим определяется по BTC относительно его
+        50-дневной средней на день входа. Если в падающем рынке результат
+        заметно хуже — это главный аргумент за фильтр режима в боевом боте.</div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card"><h3>По месяцам</h3>
+        <div class="scroll"><table><thead><tr><th>Месяц</th><th>Сделок</th>
+          <th>Итог</th></tr></thead><tbody>${monRows}</tbody></table></div></div>
+      <div class="card"><h3>По монетам</h3>
+        <div class="scroll"><table><thead><tr><th>Монета</th><th>Сделок</th>
+          <th>Винрейт</th><th>Итог</th></tr></thead>
+          <tbody>${symRows}</tbody></table></div></div>
+    </div>
+
+    <div class="card"><h3>Сделки <span class="pill">последние 300</span></h3>
+      <div class="scroll"><table><thead><tr><th>Монета</th><th>Вход</th>
+        <th>Исход</th><th>Результат</th><th>Время</th><th>Падение 3д</th>
+        <th>RSI</th><th>Просадка</th></tr></thead>
+        <tbody>${trRows}</tbody></table></div></div>`;
+
+  drawCurve(res.curve || []);
+}
+
+function drawCurve(curve){
+  const cv = $("eq"); if(!cv || curve.length < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const w = cv.clientWidth, h = 230;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const c = cv.getContext("2d"); c.scale(dpr,dpr);
+  c.fillStyle = "#1b2230"; c.fillRect(0,0,w,h);
+  const vals = curve.map(p=>p.equity);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if(hi===lo){hi=lo*1.01+1;lo=lo*0.99;}
+  const pad = (hi-lo)*0.1; lo-=pad; hi+=pad;
+  const X = i => 44 + i*(w-58)/(curve.length-1);
+  const Y = v => h-26 - (v-lo)/(hi-lo)*(h-48);
+  c.strokeStyle="#232a36"; c.lineWidth=1; c.font="10px sans-serif";
+  c.fillStyle="#7b8794";
+  for(let k=0;k<=4;k++){
+    const v = lo+(hi-lo)*k/4, y = Y(v);
+    c.beginPath(); c.moveTo(42,y); c.lineTo(w-12,y); c.stroke();
+    c.fillText(Math.round(v), 4, y+3);
+  }
+  const start = vals[0], end = vals[vals.length-1];
+  const col = end>=start ? "#26a69a" : "#ef5350";
+  c.beginPath();
+  curve.forEach((p,i)=> i?c.lineTo(X(i),Y(p.equity)):c.moveTo(X(i),Y(p.equity)));
+  c.strokeStyle=col; c.lineWidth=2; c.stroke();
+  c.lineTo(X(curve.length-1),h-26); c.lineTo(X(0),h-26); c.closePath();
+  c.fillStyle = col+"22"; c.fill();
+  c.strokeStyle="#7b879455"; c.setLineDash([4,4]); c.beginPath();
+  c.moveTo(44,Y(start)); c.lineTo(w-12,Y(start)); c.stroke(); c.setLineDash([]);
+}
+
+function renderSweep(res){
+  if(res.error) return fail(res.error);
+  const rows = res.results || [];
+  if(!rows.length) return fail("перебор ничего не вернул");
+  const best = rows[0];
+  const body = rows.map((r,i)=>`
+    <tr style="${i===0?'background:rgba(38,166,154,.08)':''}">
+      <td>${r.tp_pct}%</td><td>${r.min_drop_3d}%</td><td>${r.rsi_max_4h}</td>
+      <td>${r.min_atr_distance}</td>
+      <td>${r.trades}</td>
+      <td class="${cls(r.edge)}">${r.winrate.toFixed(1)}%</td>
+      <td class="mut">${r.breakeven_winrate.toFixed(1)}%</td>
+      <td class="${cls(r.edge)}">${fmt(r.edge,1)}</td>
+      <td class="${cls(r.expectancy)}">${fmt(r.expectancy)}%</td>
+      <td class="${cls(r.profit_factor-1)}">${r.profit_factor.toFixed(2)}</td>
+      <td class="neg">${r.max_dd.toFixed(0)}%</td></tr>`).join("");
+  $("out").innerHTML = `
+    <div class="msg ${best.expectancy>0?'ok':'err'}">
+      Лучшая комбинация: цель <b>${best.tp_pct}%</b>, падение от
+      <b>${best.min_drop_3d}%</b>, RSI до <b>${best.rsi_max_4h}</b> —
+      стоп не ближе <b>${best.min_atr_distance} ATR</b> —
+      ожидание <b>${fmt(best.expectancy)}%</b> на сделку при
+      ${best.trades} сделках.</div>
+    <div class="msg warn">Не принимай верх таблицы за истину. Чем больше
+      комбинаций перебрано, тем выше шанс, что лидер — просто подгонка под
+      прошлое. Смотри на строки, где много сделок и перевес устойчив, а не на
+      единственный выброс.</div>
+    <div class="card"><h3>Все комбинации
+      <span class="pill">${rows.length} вариантов · ${res.symbols_loaded} монет</span></h3>
+      <div class="scroll"><table><thead><tr><th>Цель</th><th>Падение</th>
+        <th>RSI</th><th>Стоп ATR</th><th>Сделок</th><th>Винрейт</th><th>Безубыток</th>
+        <th>Перевес</th><th>Ожидание</th><th>ПФ</th><th>Просадка</th>
+        </tr></thead><tbody>${body}</tbody></table></div></div>`;
+}
+
+async function loadCache(){
+  try{
+    const r = await fetch("/api/defaults"); const j = await r.json();
+    $("cacheInfo").textContent =
+      `В кэше ${j.cache.symbols} монет, ${j.cache.size_mb} МБ. ` +
+      `Повторные прогоны по тем же монетам идут без обращения к бирже.`;
+  }catch(e){}
+}
+
+$("runBtn").onclick = () => start("/api/backtest");
+$("sweepBtn").onclick = () => start("/api/sweep");
+$("clearBtn").onclick = async () => {
+  if(!confirm("Очистить кэш истории? Следующий прогон будет качать заново."))
+    return;
+  await fetch("/api/cache/clear", {method:"POST",
+    headers:{"Content-Type":"application/json"}, body:"{}"});
+  loadCache();
+};
+loadCache();
+</script>
+</body>
+</html>
